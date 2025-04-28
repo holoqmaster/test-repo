@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drone Ping Monitoring</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --status-ok: {{ config.STATUS_COLORS.ok }};
+            --status-timeout: {{ config.STATUS_COLORS.timeout }};
+            --status-error: {{ config.STATUS_COLORS.error }};
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 20px;
+            width: 100%;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .chart-card {
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .chart-card.timeout {
+            border-color: var(--status-timeout);
+            box-shadow: 0 0 10px var(--status-timeout);
+        }
+
+        .chart-card.error {
+            border-color: var(--status-error);
+            box-shadow: 0 0 10px var(--status-error);
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .chart-title {
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70%;
+        }
+
+        .status-display {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .current-latency {
+            font-weight: bold;
+            min-width: 80px;
+            text-align: right;
+        }
+
+        .latency-ok { color: var(--status-ok); }
+        .latency-timeout { color: var(--status-timeout); }
+        .latency-error { color: var(--status-error); }
+
+        .status-icon {
+            font-size: 1.2em;
+        }
+
+        .icon-ok { color: var(--status-ok); }
+        .icon-timeout { color: var(--status-timeout); }
+        .icon-error { color: var(--status-error); }
+
+        .chart-container {
+            height: 250px;
+            width: 100%;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 50%;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        #manageDronesBtn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        #droneList {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        #droneList li {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        #droneList button {
+            float: right;
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            margin: 5px;
+            width: 200px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            .modal-content {
+                width: 90%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> Back to Main Dashboard</a>
+        <button id="manageDronesBtn"><i class="fas fa-cog"></i> Manage Drones</button>
+        <h1>Drone Ping Latency Monitoring</h1>
+
+        <div class="dashboard" id="dashboard">
+            {% for target, ip in targets.items() %}
+            <div class="chart-card" id="{{ target }}-card">
+                <div class="chart-header">
+                    <div class="chart-title">{{ target }} ({{ ip }})</div>
+                    <div class="status-display">
+                        <div class="current-latency" id="{{ target }}-latency">-- ms</div>
+                        <div class="status-icon" id="{{ target }}-icon">
+                            <i class="fas fa-circle-notch fa-spin"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="{{ target }}-chart"></canvas>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Modal Dialog -->
+    <div id="droneModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Manage Drones</h2>
+            <div>
+                <h3>Add New Drone</h3>
+                <input type="text" id="newDroneName" placeholder="Drone Name">
+                <input type="text" id="newDroneIP" placeholder="IP Address">
+                <button id="addDroneBtn">Add Drone</button>
+            </div>
+            <div>
+                <h3>Current Drones</h3>
+                <ul id="droneList"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Color palette for charts
+        const colors = [
+            '#4e79a7', '#f28e2b', '#e15759', '#76b7b2',
+            '#59a14f', '#edc948', '#b07aa1', '#ff9da7',
+            '#9c755f', '#bab0ac', '#8cd17d', '#79706e'
+        ];
+
+        // Object to store all chart instances
+        const charts = {};
+
+        // Initialize charts for each target
+        {% for target, ip in targets.items() %}
+        createChartForDrone('{{ target }}', '{{ ip }}');
+        {% endfor %}
+
+        function createChartForDrone(target, ip) {
+            const ctx = document.getElementById(`${target}-chart`).getContext('2d');
+            charts[target] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Latency (ms)',
+                        borderColor: colors[Object.keys(charts).length % colors.length],
+                        backgroundColor: colors[Object.keys(charts).length % colors.length] + '20',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.1,
+                        data: []
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'Time (seconds)' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Latency (ms)' },
+                            suggestedMax: {{ config.TIMEOUT_THRESHOLD }},
+                            ticks: {
+                                callback: function(value) {
+                                    return Math.round(value) + ' ms';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `${Math.round(context.parsed.y)} ms`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Configuration for different status states
+        const statusConfig = {
+            'ok': {
+                icon: '<i class="fas fa-check-circle icon-ok"></i>',
+                latencyClass: 'latency-ok',
+                cardClass: ''
+            },
+            'timeout': {
+                icon: '<i class="fas fa-exclamation-triangle icon-timeout"></i>',
+                latencyClass: 'latency-timeout',
+                cardClass: 'timeout'
+            },
+            'error': {
+                icon: '<i class="fas fa-times-circle icon-error"></i>',
+                latencyClass: 'latency-error',
+                cardClass: 'error'
+            }
+        };
+
+        // Connect to Socket.io server
+        const socket = io();
+
+        // Modal functionality
+        const modal = document.getElementById("droneModal");
+        const btn = document.getElementById("manageDronesBtn");
+        const span = document.getElementsByClassName("close")[0];
+
+        btn.onclick = function() {
+            modal.style.display = "block";
+            fetchDrones();
+        }
+
+        span.onclick = function() {
+            modal.style.display = "none";
+        }
+
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+
+        // Drone management functions
+        // Update the fetchDrones function to properly escape drone names
+        function fetchDrones() {
+            fetch('/api/drones')
+                .then(response => response.json())
+                .then(data => {
+                    const list = document.getElementById('droneList');
+                    list.innerHTML = '';
+                    for (const [name, ip] of Object.entries(data)) {
+                        const li = document.createElement('li');
+                        // Use proper escaping for the onclick handler
+                        li.innerHTML = `${name}: ${ip} <button onclick="removeDrone('${name.replace(/'/g, "\\'")}')">Remove</button>`;
+                        list.appendChild(li);
+                    }
+                });
+        }
+
+        function addDrone() {
+        const name = document.getElementById('newDroneName').value;
+        const ip = document.getElementById('newDroneIP').value;
+
+        if (!name || !ip) {
+            alert('Please enter both drone name and IP address');
+            return;
+        }
+
+        fetch('/api/drones', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({name: name, ip: ip}),
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw err; });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                document.getElementById('newDroneName').value = '';
+                document.getElementById('newDroneIP').value = '';
+                // Don't fetch drones here - let the socket.io event handle it
+            } else {
+                alert('Failed to add drone: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to add drone: ' + (error.error || 'Network error'));
+            });
+        }
+        function removeDrone(name) {
+            if (confirm(`Are you sure you want to remove drone ${name}?`)) {
+                fetch('/api/drones', {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({name: name}),
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw err; });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        // Don't fetch drones here - let the socket.io event handle it
+                        // The card will be removed by the drone_removed event handler
+                    } else {
+                        alert('Failed to remove drone: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to remove drone: ' + (error.error || 'Network error'));
+                });
+            }
+        }
+
+
+        document.getElementById('addDroneBtn').addEventListener('click', addDrone);
+
+        // Socket.io event handlers
+        socket.on('initial_drone_data', data => {
+            Object.entries(data).forEach(([target, values]) => {
+                if (!charts[target]) {
+                    addDroneCard(target, DRONE_TARGETS[target]);
+                }
+
+                const chart = charts[target];
+                const formattedData = values.map(v => ({x: v.time, y: v.latency}));
+                chart.data.datasets[0].data = formattedData;
+
+                if (values.length > 0) {
+                    const maxLatency = Math.max(...formattedData.map(d => d.y));
+                    chart.options.scales.y.max = Math.min(
+                        maxLatency * 1.2,
+                        {{ config.TIMEOUT_THRESHOLD }}
+                    );
+                    updateStatus(target, {
+                        ...values[values.length-1],
+                        latency: Math.round(values[values.length-1].latency)
+                    });
+                }
+                chart.update();
+            });
+        });
+
+        socket.on('drone_update', updates => {
+            Object.entries(updates).forEach(([target, update]) => {
+                if (!charts[target]) {
+                    addDroneCard(target, DRONE_TARGETS[target]);
+                }
+
+                const chart = charts[target];
+                chart.data.datasets[0].data.push({
+                    x: update.time,
+                    y: update.latency
+                });
+
+                if (chart.data.datasets[0].data.length > {{ config.MAX_HISTORY }}) {
+                    chart.data.datasets[0].data.shift();
+                }
+
+                const maxLatency = Math.max(...chart.data.datasets[0].data.map(d => d.y));
+                chart.options.scales.y.max = Math.min(
+                    maxLatency * 1.2,
+                    {{ config.TIMEOUT_THRESHOLD }}
+                );
+
+                chart.update();
+                updateStatus(target, {
+                    ...update,
+                    latency: Math.round(update.latency)
+                });
+            });
+        });
+
+        socket.on('drone_added', data => {
+            addDroneCard(data.name, data.ip);
+        });
+        socket.on('drone_removed', data => {
+            // Remove the card from UI
+            const card = document.getElementById(`${data.name}-card`);
+            if (card) {
+                card.remove();
+            }
+
+            // Remove the chart instance
+            if (charts[data.name]) {
+                charts[data.name].destroy();
+                delete charts[data.name];
+            }
+
+            // Update the drone list in the modal
+            fetchDrones();
+        });
+        function addDroneCard(target, ip) {
+            if (document.getElementById(`${target}-card`)) return;
+
+            const dashboard = document.getElementById('dashboard');
+
+            const card = document.createElement('div');
+            card.className = 'chart-card';
+            card.id = `${target}-card`;
+
+            card.innerHTML = `
+                <div class="chart-header">
+                    <div class="chart-title">${target} (${ip})</div>
+                    <div class="status-display">
+                        <div class="current-latency" id="${target}-latency">-- ms</div>
+                        <div class="status-icon" id="${target}-icon">
+                            <i class="fas fa-circle-notch fa-spin"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="${target}-chart"></canvas>
+                </div>
+            `;
+
+            dashboard.appendChild(card);
+            createChartForDrone(target, ip);
+        }
+
+        function removeDroneCard(target) {
+            const card = document.getElementById(`${target}-card`);
+            if (card) card.remove();
+
+            if (charts[target]) {
+                charts[target].destroy();
+                delete charts[target];
+            }
+        }
+
+        function updateStatus(target, data) {
+            const config = statusConfig[data.status] || statusConfig.error;
+
+            const latencyElement = document.getElementById(`${target}-latency`);
+            const iconElement = document.getElementById(`${target}-icon`);
+            const cardElement = document.getElementById(`${target}-card`);
+
+            if (latencyElement) {
+                latencyElement.textContent = `${data.latency} ms`;
+                latencyElement.className = `current-latency ${config.latencyClass}`;
+            }
+
+            if (iconElement) {
+                iconElement.innerHTML = config.icon;
+            }
+
+            if (cardElement) {
+                cardElement.className = `chart-card ${config.cardClass}`;
+            }
+        }
+    </script>
+</body>
+</html>
