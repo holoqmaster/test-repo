@@ -13,16 +13,7 @@ from threading import Thread
 matplotlib.use('Agg')
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
-
-
-@dataclass
-class PingResult:
-    time: float
-    latency: float
-    status: str
-
 
 # Data storage
 website_data = {target: [] for target in WEBSITE_TARGETS}
@@ -30,27 +21,33 @@ drone_data = {target: [] for target in DRONE_TARGETS}
 data_lock = threading.Lock()
 start_time = time.time()
 
+@dataclass
+class PingResult:
+    time: float
+    latency: float
+    status: str
 
 class PingListener(Thread):
     def __init__(self, socketio):
         super().__init__()
         self.socketio = socketio
         self.running = True
-        self.context = zmq.Context()
 
     def run(self):
-        socket = self.context.socket(zmq.SUB)
-        socket.connect("tcp://localhost:5556")
-        socket.setsockopt_string(zmq.SUBSCRIBE, "Ping")
-
-        poller = zmq.Poller()
-        poller.register(socket, zmq.POLLIN)
+        print(f"[{threading.current_thread().name}] Created ZMQ socket")
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.SUB)
+        self.socket.connect("tcp://localhost:5556")
+        self.socket.setsockopt_string(zmq.SUBSCRIBE, "Ping")
+        self.poller = zmq.Poller()
+        self.poller.register(self.socket, zmq.POLLIN)
 
         while self.running:
-            socks = dict(poller.poll(timeout=100))
-            if socket in socks:
+            socks = dict(self.poller.poll(timeout=100))
+            print("Polling!!!")
+            if self.socket in socks:
                 try:
-                    message = socket.recv_string()
+                    message = self.socket.recv_string()
                     if message.startswith("Ping "):
                         data = json.loads(message[5:])
                         if data.get('type') == 'drone_ping':
@@ -245,10 +242,10 @@ def handle_connect():
         app.website_thread.daemon = True
         app.website_thread.start()
 
-    if not hasattr(app, 'drone_thread'):
-        app.drone_thread = threading.Thread(target=track_drones)
-        app.drone_thread.daemon = True
-        app.drone_thread.start()
+    # if not hasattr(app, 'drone_thread'):
+    #     app.drone_thread = threading.Thread(target=track_drones)
+    #     app.drone_thread.daemon = True
+    #     app.drone_thread.start()
 
     with data_lock:
         socketio.emit('initial_data', {
@@ -273,6 +270,7 @@ def handle_connect():
 @app.teardown_appcontext
 def cleanup(exception=None):
     if hasattr(app, 'ping_listener'):
+        print("Stopping ping listener")
         app.ping_listener.stop()
 
 
@@ -280,4 +278,4 @@ if __name__ == '__main__':
     app.ping_listener = PingListener(socketio)
     app.ping_listener.daemon = True
     app.ping_listener.start()
-    socketio.run(app, debug=True, host='0.0.0.0')
+    socketio.run(app, debug=False, host='0.0.0.0')
