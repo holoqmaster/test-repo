@@ -32,9 +32,6 @@ class PingListener(Thread):
         super().__init__()
         self.socketio = socketio
         self.running = True
-
-    def run(self):
-        print(f"[{threading.current_thread().name}] Created ZMQ socket")
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.SUB)
         self.socket.connect("tcp://localhost:5556")
@@ -42,6 +39,7 @@ class PingListener(Thread):
         self.poller = zmq.Poller()
         self.poller.register(self.socket, zmq.POLLIN)
 
+    def run(self):
         while self.running:
             socks = dict(self.poller.poll(timeout=100))
             if self.socket in socks:
@@ -65,9 +63,7 @@ class PingListener(Thread):
             try:
                 latency = float(result['latency'])
                 status = result.get('status', 'ok')
-
-                if status not in ['ok', 'timeout', 'error']:
-                    status = 'timeout' if latency >= CONFIG['DRONE_TIMEOUT'] else 'ok'
+                status = 'ok' if status == 'ok' and latency < CONFIG['DRONE_TIMEOUT'] else 'timeout'
 
                 updates[target] = {
                     'time': current_time,
@@ -76,27 +72,26 @@ class PingListener(Thread):
                 }
 
                 with data_lock:
-                    if target not in drone_data:
-                        drone_data[target] = []
+                    drone_data.setdefault(target, [])
                     drone_data[target].append(PingResult(
                         time=current_time,
                         latency=latency,
                         status=status
                     ))
+                    # Keep only the most recent data
                     if len(drone_data[target]) > CONFIG['MAX_HISTORY']:
                         drone_data[target].pop(0)
 
             except (ValueError, KeyError) as e:
                 print(f"Error processing {target} data: {e}")
-                continue
 
         if updates:
             self.socketio.emit('drone_update', updates)
 
     def stop(self):
         self.running = False
-        self.context.destroy()
-
+        self.socket.close()
+        self.context.term()
 
 def ping_target(target):
     try:
@@ -106,11 +101,10 @@ def ping_target(target):
         if latency > CONFIG['LATENCY_TIMEOUT']:
             return {'latency': latency, 'status': 'timeout'}
         return {'latency': latency, 'status': 'ok'}
-    except errors.PingError as e:
-        return {'latency': 0, 'status': 'error', 'message': str(e)}
-    except Exception as e:
-        return {'latency': 0, 'status': 'error', 'message': f'Unexpected error: {str(e)}'}
-
+    except errors.PingError:
+        return {'latency': 0, 'status': 'error'}
+    except Exception:
+        return {'latency': 0, 'status': 'error'}
 
 def track_websites():
     while True:
@@ -118,11 +112,11 @@ def track_websites():
         with data_lock:
             current_time = time.time() - start_time
             updates = {}
-            for target in WEBSITE_TARGETS:
+            for target, result in results.items():
                 new_result = PingResult(
                     time=current_time,
-                    latency=results[target]['latency'],
-                    status=results[target]['status']
+                    latency=result['latency'],
+                    status=result['status']
                 )
                 website_data[target].append(new_result)
                 if len(website_data[target]) > CONFIG['MAX_HISTORY']:
@@ -134,7 +128,6 @@ def track_websites():
                 }
             socketio.emit('latency_update', updates)
         time.sleep(CONFIG['WEBSITE_PING_INTERVAL'])
-
 
 def track_drones():
     while True:
@@ -168,24 +161,18 @@ def track_drones():
                 socketio.emit('drone_update', updates)
         time.sleep(CONFIG['DRONE_PING_INTERVAL'])
 
-
 @app.route('/')
 def index():
     return render_template('index.html', targets=WEBSITE_TARGETS, config=CONFIG)
-
 
 @app.route('/drones')
 def drones():
     return render_template('drones.html', targets=DRONE_TARGETS, config=CONFIG)
 
-
 @app.route('/api/drones', methods=['GET', 'POST', 'DELETE'])
 def manage_drones():
-    if request.method == 'GET':
-        return jsonify(DRONE_TARGETS)
-
     data = request.get_json()
-    if not data or 'name' not in data:
+    if request.method in ['POST', 'DELETE'] and (not data or 'name' not in data):
         return jsonify({'error': 'Invalid data'}), 400
 
     if request.method == 'POST':
@@ -199,19 +186,19 @@ def manage_drones():
 
     elif request.method == 'DELETE':
         if data['name'] in DRONE_TARGETS:
-            ip = DRONE_TARGETS[data['name']]
-            del DRONE_TARGETS[data['name']]
+            ip = DRONE_TARGETS.pop(data['name'])
             with data_lock:
-                if data['name'] in drone_data:
-                    del drone_data[data['name']]
+                drone_data.pop(data['name'], None)
             socketio.emit('drone_removed', {'name': data['name'], 'ip': ip})
             return jsonify({'success': True})
         return jsonify({'error': 'Drone not found'}), 404
 
+    return jsonify(DRONE_TARGETS)
+
 @app.route('/history/websites')
 def get_website_history():
     with data_lock:
-        return json.dumps({
+        return jsonify({
             target: [{
                 'time': r.time,
                 'latency': r.latency,
@@ -220,11 +207,10 @@ def get_website_history():
             for target in WEBSITE_TARGETS
         })
 
-
 @app.route('/history/drones')
 def get_drone_history():
     with data_lock:
-        return json.dumps({
+        return jsonify({
             target: [{
                 'time': r.time,
                 'latency': r.latency,
@@ -233,14 +219,12 @@ def get_drone_history():
             for target in DRONE_TARGETS
         })
 
-
 @socketio.on('connect')
 def handle_connect():
     if not hasattr(app, 'website_thread'):
         app.website_thread = threading.Thread(target=track_websites)
         app.website_thread.daemon = True
         app.website_thread.start()
-
 
     with data_lock:
         socketio.emit('initial_data', {
@@ -261,17 +245,18 @@ def handle_connect():
             for target in DRONE_TARGETS
         })
 
-
 @app.teardown_appcontext
 def cleanup(exception=None):
-    print("app.teardown_appcontext cleanup")
+    print("cleanup")
     if hasattr(app, 'ping_listener'):
-        print("app.teardown_appcontext cleanup")
+        print("ping listener stop")
         app.ping_listener.stop()
 
-
 if __name__ == '__main__':
-    app.ping_listener = PingListener(socketio)
-    app.ping_listener.daemon = True
-    app.ping_listener.start()
-    socketio.run(app, debug=False, host='0.0.0.0')
+    ping_listener = PingListener(socketio)
+    ping_listener.daemon = True
+    ping_listener.start()
+    try:
+        socketio.run(app, debug=False, host='0.0.0.0')
+    finally:
+        ping_listener.stop()
