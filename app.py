@@ -44,7 +44,6 @@ class PingListener(Thread):
 
         while self.running:
             socks = dict(self.poller.poll(timeout=100))
-            print("Polling!!!")
             if self.socket in socks:
                 try:
                     message = self.socket.recv_string()
@@ -242,10 +241,6 @@ def handle_connect():
         app.website_thread.daemon = True
         app.website_thread.start()
 
-    # if not hasattr(app, 'drone_thread'):
-    #     app.drone_thread = threading.Thread(target=track_drones)
-    #     app.drone_thread.daemon = True
-    #     app.drone_thread.start()
 
     with data_lock:
         socketio.emit('initial_data', {
@@ -269,8 +264,9 @@ def handle_connect():
 
 @app.teardown_appcontext
 def cleanup(exception=None):
+    print("app.teardown_appcontext cleanup")
     if hasattr(app, 'ping_listener'):
-        print("Stopping ping listener")
+        print("app.teardown_appcontext cleanup")
         app.ping_listener.stop()
 
 
