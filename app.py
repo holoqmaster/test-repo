@@ -245,7 +245,8 @@ def handle_connect():
             for target in DRONE_TARGETS
         })
 
-@app.teardown_appcontext
+@app.teardown_appcontext   #cause used daemon threads which automatically exits when main exits
+                            # Registers a function to be called when the application context ends
 def cleanup(exception=None):
     print("cleanup")
     if hasattr(app, 'ping_listener'):
