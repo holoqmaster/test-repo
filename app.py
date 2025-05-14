@@ -173,31 +173,6 @@ def index():
 def drones():
     return render_template('drones.html', targets=DRONE_TARGETS, config=CONFIG)
 
-@app.route('/api/drones', methods=['GET', 'POST', 'DELETE'])
-def manage_drones():
-    data = request.get_json()
-    if request.method in ['POST', 'DELETE'] and (not data or 'name' not in data):
-        return jsonify({'error': 'Invalid data'}), 400
-
-    if request.method == 'POST':
-        if 'ip' not in data:
-            return jsonify({'error': 'IP address required'}), 400
-        DRONE_TARGETS[data['name']] = data['ip']
-        with data_lock:
-            drone_data[data['name']] = []
-        socketio.emit('drone_added', {'name': data['name'], 'ip': data['ip']})
-        return jsonify({'success': True})
-
-    elif request.method == 'DELETE':
-        if data['name'] in DRONE_TARGETS:
-            ip = DRONE_TARGETS.pop(data['name'])
-            with data_lock:
-                drone_data.pop(data['name'], None)
-            socketio.emit('drone_removed', {'name': data['name'], 'ip': ip})
-            return jsonify({'success': True})
-        return jsonify({'error': 'Drone not found'}), 404
-
-    return jsonify(DRONE_TARGETS)
 
 @app.route('/history/websites')
 def get_website_history():
