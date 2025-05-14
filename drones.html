@@ -111,83 +111,9 @@
             text-decoration: none;
         }
 
-        /* Modal styles */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.4);
-        }
-
-        .modal-content {
-            background-color: #fefefe;
-            margin: 15% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 50%;
-        }
-
-        .close {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        .close:hover {
-            color: black;
-        }
-
-        #manageDronesBtn {
-            display: inline-block;
-            padding: 10px 20px;
-            background-color: #3498db;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-            border: none;
-            cursor: pointer;
-            margin-bottom: 20px;
-        }
-
-        #droneList {
-            list-style-type: none;
-            padding: 0;
-        }
-
-        #droneList li {
-            padding: 8px;
-            border-bottom: 1px solid #ddd;
-        }
-
-        #droneList button {
-            float: right;
-            background-color: #e74c3c;
-            color: white;
-            border: none;
-            padding: 3px 8px;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-
-        input[type="text"] {
-            padding: 8px;
-            margin: 5px;
-            width: 200px;
-        }
-
         @media (max-width: 768px) {
             .dashboard {
                 grid-template-columns: 1fr;
-            }
-            .modal-content {
-                width: 90%;
             }
         }
     </style>
@@ -195,7 +121,6 @@
 <body>
     <div class="container">
         <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> Back to Main Dashboard</a>
-        <button id="manageDronesBtn"><i class="fas fa-cog"></i> Manage Drones</button>
         <h1>Drone Ping Latency Monitoring</h1>
 
         <div class="dashboard" id="dashboard">
@@ -215,24 +140,6 @@
                 </div>
             </div>
             {% endfor %}
-        </div>
-    </div>
-
-    <!-- Modal Dialog -->
-    <div id="droneModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Manage Drones</h2>
-            <div>
-                <h3>Add New Drone</h3>
-                <input type="text" id="newDroneName" placeholder="Drone Name">
-                <input type="text" id="newDroneIP" placeholder="IP Address">
-                <button id="addDroneBtn">Add Drone</button>
-            </div>
-            <div>
-                <h3>Current Drones</h3>
-                <ul id="droneList"></ul>
-            </div>
         </div>
     </div>
 
@@ -321,119 +228,9 @@
         // Connect to Socket.io server
         const socket = io();
 
-        // Modal functionality
-        const modal = document.getElementById("droneModal");
-        const btn = document.getElementById("manageDronesBtn");
-        const span = document.getElementsByClassName("close")[0];
-
-        btn.onclick = function() {
-            modal.style.display = "block";
-            fetchDrones();
-        }
-
-        span.onclick = function() {
-            modal.style.display = "none";
-        }
-
-        window.onclick = function(event) {
-            if (event.target == modal) {
-                modal.style.display = "none";
-            }
-        }
-
-        // Drone management functions
-        // Update the fetchDrones function to properly escape drone names
-        function fetchDrones() {
-            fetch('/api/drones')
-                .then(response => response.json())
-                .then(data => {
-                    const list = document.getElementById('droneList');
-                    list.innerHTML = '';
-                    for (const [name, ip] of Object.entries(data)) {
-                        const li = document.createElement('li');
-                        // Use proper escaping for the onclick handler
-                        li.innerHTML = `${name}: ${ip} <button onclick="removeDrone('${name.replace(/'/g, "\\'")}')">Remove</button>`;
-                        list.appendChild(li);
-                    }
-                });
-        }
-
-        function addDrone() {
-        const name = document.getElementById('newDroneName').value;
-        const ip = document.getElementById('newDroneIP').value;
-
-        if (!name || !ip) {
-            alert('Please enter both drone name and IP address');
-            return;
-        }
-
-        fetch('/api/drones', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({name: name, ip: ip}),
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => { throw err; });
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                document.getElementById('newDroneName').value = '';
-                document.getElementById('newDroneIP').value = '';
-                // Don't fetch drones here - let the socket.io event handle it
-            } else {
-                alert('Failed to add drone: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Failed to add drone: ' + (error.error || 'Network error'));
-            });
-        }
-        function removeDrone(name) {
-            if (confirm(`Are you sure you want to remove drone ${name}?`)) {
-                fetch('/api/drones', {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({name: name}),
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(err => { throw err; });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    if (data.success) {
-                        // Don't fetch drones here - let the socket.io event handle it
-                        // The card will be removed by the drone_removed event handler
-                    } else {
-                        alert('Failed to remove drone: ' + (data.error || 'Unknown error'));
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Failed to remove drone: ' + (error.error || 'Network error'));
-                });
-            }
-        }
-
-
-        document.getElementById('addDroneBtn').addEventListener('click', addDrone);
-
         // Socket.io event handlers
         socket.on('initial_drone_data', data => {
             Object.entries(data).forEach(([target, values]) => {
-                if (!charts[target]) {
-                    addDroneCard(target, DRONE_TARGETS[target]);
-                }
-
                 const chart = charts[target];
                 const formattedData = values.map(v => ({x: v.time, y: v.latency}));
                 chart.data.datasets[0].data = formattedData;
@@ -455,10 +252,6 @@
 
         socket.on('drone_update', updates => {
             Object.entries(updates).forEach(([target, update]) => {
-                if (!charts[target]) {
-                    addDroneCard(target, DRONE_TARGETS[target]);
-                }
-
                 const chart = charts[target];
                 chart.data.datasets[0].data.push({
                     x: update.time,
@@ -482,63 +275,6 @@
                 });
             });
         });
-
-        socket.on('drone_added', data => {
-            addDroneCard(data.name, data.ip);
-        });
-        socket.on('drone_removed', data => {
-            // Remove the card from UI
-            const card = document.getElementById(`${data.name}-card`);
-            if (card) {
-                card.remove();
-            }
-
-            // Remove the chart instance
-            if (charts[data.name]) {
-                charts[data.name].destroy();
-                delete charts[data.name];
-            }
-
-            // Update the drone list in the modal
-            fetchDrones();
-        });
-        function addDroneCard(target, ip) {
-            if (document.getElementById(`${target}-card`)) return;
-
-            const dashboard = document.getElementById('dashboard');
-
-            const card = document.createElement('div');
-            card.className = 'chart-card';
-            card.id = `${target}-card`;
-
-            card.innerHTML = `
-                <div class="chart-header">
-                    <div class="chart-title">${target} (${ip})</div>
-                    <div class="status-display">
-                        <div class="current-latency" id="${target}-latency">-- ms</div>
-                        <div class="status-icon" id="${target}-icon">
-                            <i class="fas fa-circle-notch fa-spin"></i>
-                        </div>
-                    </div>
-                </div>
-                <div class="chart-container">
-                    <canvas id="${target}-chart"></canvas>
-                </div>
-            `;
-
-            dashboard.appendChild(card);
-            createChartForDrone(target, ip);
-        }
-
-        function removeDroneCard(target) {
-            const card = document.getElementById(`${target}-card`);
-            if (card) card.remove();
-
-            if (charts[target]) {
-                charts[target].destroy();
-                delete charts[target];
-            }
-        }
 
         function updateStatus(target, data) {
             const config = statusConfig[data.status] || statusConfig.error;

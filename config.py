@@ -40,7 +40,7 @@ CONFIG = {
     # Display settings
     'TIMEOUT_THRESHOLD': 2000,  # ms (max chart value)
     'LATENCY_TIMEOUT': 1500,  # ms (considered timeout)
-    'MAX_HISTORY': 1000,  # data points per target
+    'MAX_HISTORY': 100,  # data points per target
 
     # Status colors
     'STATUS_COLORS': {
