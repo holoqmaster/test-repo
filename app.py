@@ -4,11 +4,15 @@ import time
 import threading
 from ping3 import ping, errors
 import matplotlib
-from config import WEBSITE_TARGETS, DRONE_TARGETS, CONFIG
+from config import HOST_TARGETS, ALL_DRONE_TARGETS, CONFIG
 from dataclasses import dataclass
 import json
 import zmq
 from threading import Thread
+
+# Temp hardcoded, replace w environment variables when things are more fully set up
+drone_number = "drone_1"
+DRONE_TARGETS = ALL_DRONE_TARGETS[drone_number]
 
 matplotlib.use('Agg')
 
@@ -16,7 +20,7 @@ app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
 # Data storage
-website_data = {target: [] for target in WEBSITE_TARGETS}
+website_data = {target: [] for target in HOST_TARGETS}
 drone_data = {target: [] for target in DRONE_TARGETS}
 data_lock = threading.Lock()
 start_time = time.time()
@@ -108,7 +112,7 @@ def ping_target(target):
 
 def track_websites():
     while True:
-        results = {target: ping_target(target) for target in WEBSITE_TARGETS}
+        results = {target: ping_target(target) for target in HOST_TARGETS}
         with data_lock:
             current_time = time.time() - start_time
             updates = {}
@@ -163,7 +167,7 @@ def track_drones():
 
 @app.route('/')
 def index():
-    return render_template('index.html', targets=WEBSITE_TARGETS, config=CONFIG)
+    return render_template('index.html', targets=HOST_TARGETS, config=CONFIG)
 
 @app.route('/drones')
 def drones():
@@ -204,7 +208,7 @@ def get_website_history():
                 'latency': r.latency,
                 'status': r.status
             } for r in website_data[target]]
-            for target in WEBSITE_TARGETS
+            for target in HOST_TARGETS
         })
 
 @app.route('/history/drones')
@@ -233,7 +237,7 @@ def handle_connect():
                 'latency': r.latency,
                 'status': r.status
             } for r in website_data[target]]
-            for target in WEBSITE_TARGETS
+            for target in HOST_TARGETS
         })
 
         socketio.emit('initial_drone_data', {

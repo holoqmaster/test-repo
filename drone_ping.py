@@ -2,10 +2,13 @@ from ping3 import ping
 import zmq
 import time
 import json
-from config import DRONE_TARGETS, CONFIG
+from config import ALL_DRONE_TARGETS, CONFIG
 import threading
 from datetime import datetime
 
+# Temp hardcoded, replace w environment variables when things are more fully set up
+drone_number = "drone_1"
+DRONE_TARGETS = ALL_DRONE_TARGETS[drone_number]
 
 class DronePinger:
     def __init__(self):
