@@ -2,16 +2,22 @@ from ping3 import ping
 import zmq
 import time
 import json
-from config import ALL_DRONE_TARGETS, CONFIG
+from config import CONFIG, ALL_DRONE_IPS
 import threading
 from datetime import datetime
-
-# Temp hardcoded, replace w environment variables when things are more fully set up
-drone_number = "drone_1"
-DRONE_TARGETS = ALL_DRONE_TARGETS[drone_number]
+import os
 
 class DronePinger:
-    def __init__(self):
+    def __init__(self, ip_addr_):
+        self.ip_address = ip_addr_
+        print("self.ip_address = {}".format(self.ip_address))
+
+        self.all_drone_ips = ALL_DRONE_IPS
+        for index, drone_ip in enumerate(self.all_drone_ips):
+            if drone_ip == self.ip_address:
+                self.agent_id = index
+        print("My agent id is: ", self.agent_id)
+
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.PUB)
         self.socket.bind("tcp://*:5556")
@@ -19,8 +25,21 @@ class DronePinger:
         self.results = {}
         self.lock = threading.Lock()
         self.ping_count = 0
-
-    def ping_one(self, target, ip):
+        
+    def ping_all_drones(self):
+        threads = []
+        for index, drone_ip in enumerate(self.all_drone_ips):
+            if drone_ip != self.ip_address:
+                print("Pinging drone_ip: {}".format(drone_ip))
+                title = "Agent " + str(self.agent_id) + " ping Agent " + str(index)
+                t = threading.Thread(target=self.ping_one, args=(title, drone_ip), daemon=True)
+                t.start()
+                threads.append(t)
+                
+        for t in threads:
+            t.join(CONFIG['DRONE_TIMEOUT'] / 1000 + 0.2)
+    
+    def ping_one(self, title, ip):
         try:
             # Get raw ping result
             raw_latency = ping(ip, timeout=CONFIG['DRONE_TIMEOUT'] / 1000, unit='ms')
@@ -30,33 +49,21 @@ class DronePinger:
             status = 'timeout' if latency >= CONFIG['DRONE_TIMEOUT'] else 'ok'
 
             with self.lock:
-                self.results[target] = {
+                self.results[title] = {
                     'latency': latency,
                     'status': status,
                     'ip': ip
                 }
             return True
         except Exception as e:
-            print(f"❌ Ping error for {target}: {str(e)}")
+            print(f"❌ Ping error for {title}: {str(e)}")
             with self.lock:
-                self.results[target] = {
+                self.results[title] = {
                     'latency': CONFIG['DRONE_TIMEOUT'],
                     'status': 'error',
                     'ip': ip
                 }
             return False
-
-    def ping_all_drones(self):
-        threads = []
-        for target, ip in DRONE_TARGETS.items():
-            t = threading.Thread(target=self.ping_one, args=(target, ip), daemon=True)
-            t.start()
-            threads.append(t)
-
-        for t in threads:
-            t.join(CONFIG['DRONE_TIMEOUT'] / 1000 + 0.2)
-
-        return self.results
 
     def format_ping_result(self, target, result):
         status_icons = {
@@ -87,19 +94,19 @@ class DronePinger:
             try:
                 self.ping_count += 1
                 start_time = time.time()
-                self.results = {}
 
-                results = self.ping_all_drones()
-                self.print_ping_summary(results)
+                self.results = {}
+                self.ping_all_drones() # Create threads that update ping results inside self.results 
+                self.print_ping_summary(self.results)
 
                 message = {
                     "type": "drone_ping",
                     "timestamp": start_time,
                     "ping_count": self.ping_count,
-                    "results": results
+                    "results": self.results
                 }
 
-                # Send the message
+                # Send the message .....
                 self.socket.send_string(f"Ping {json.dumps(message)}")
 
                 # Calculate and sleep for remaining interval time
@@ -115,7 +122,8 @@ class DronePinger:
 
 
 if __name__ == "__main__":
-    pinger = DronePinger()
+    ip_addr = os.getenv('MY_IP_ADDR')
+    pinger = DronePinger(ip_addr)
     try:
         pinger.ping_loop()
     except KeyboardInterrupt:

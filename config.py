@@ -2,9 +2,14 @@
 
 # Website targets to monitor
 HOST_TARGETS = [
-    'cloudflare.com', 'google.com', 'amazon.com', 'github.com',
-    'microsoft.com', 'twitter.com', 'reddit.com', 'wikipedia.org',
-    'stackoverflow.com', 'digitalocean.com', 'linode.com', 'heroku.com'
+    # 'cloudflare.com', 'google.com', 'amazon.com', 'github.com',
+    # 'microsoft.com', 'twitter.com', 'reddit.com', 'wikipedia.org',
+    # 'stackoverflow.com', 'digitalocean.com', 'linode.com', 'heroku.com'
+    '192.168.65.199', '192.168.65.200', '192.168.65.201', 'google.com'
+]
+
+ALL_DRONE_IPS = [
+    '192.168.65.199', '192.168.65.200', '192.168.65.201', 'google.com'
 ]
 
 # Drone network IP addresses (can be modified at runtime)
