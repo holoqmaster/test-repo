@@ -13,9 +13,6 @@ import os
 # This script monitors the latency of drones and websites, providing real-time updates via a web interface.
 # It uses Flask for the web server and Flask-SocketIO for real-time communication.
 
-for index, target in enumerate(ALL_DRONE_IPS):
-    DRONE_TARGETS = {}
-
 drone_number = "drone_1"
 DRONE_TARGETS = ALL_DRONE_TARGETS[drone_number]
 my_ip_addr = os.getenv('MY_IP_ADDR')
@@ -24,10 +21,8 @@ my_ip_addr = os.getenv('MY_IP_ADDR')
 gcs_to_drone_latency_data = {
     target: [] for target in ALL_DRONE_IPS 
 }# ground control station (the one running this script) to drone latency data
-gcs_to_drone_latency_result = {}
 drone_to_drone_latency_data = {target: [] for target in DRONE_TARGETS} # latency in between drones
 data_lock = threading.Lock()
-gcs_to_drone_lock = threading.Lock()
 start_time = time.time()
 
 app = Flask(__name__)
@@ -39,7 +34,7 @@ class PingResult:
     latency: float
     status: str
 
-class PingListener(Thread):
+class InterDroneLatencyTracker(Thread):
     def __init__(self, socketio):
         super().__init__()
         self.socketio = socketio
@@ -51,19 +46,6 @@ class PingListener(Thread):
         self.poller = zmq.Poller()
         self.poller.register(self.socket, zmq.POLLIN)
 
-    def run(self):
-        while self.running:
-            socks = dict(self.poller.poll(timeout=100))
-            if self.socket in socks:
-                try:
-                    message = self.socket.recv_string()
-                    if message.startswith("Ping "):
-                        data = json.loads(message[5:])
-                        if data.get('type') == 'drone_ping':
-                            self.process_drone_ping(data)
-                except Exception as e:
-                    print(f"Error processing message: {e}")
-
     def process_drone_ping(self, data):
         current_time = time.time() - start_time
         updates = {}
@@ -71,7 +53,6 @@ class PingListener(Thread):
         for target, result in data['results'].items():
             if target not in DRONE_TARGETS:
                 continue
-
             try:
                 latency = float(result['latency'])
                 status = result.get('status', 'ok')
@@ -100,67 +81,101 @@ class PingListener(Thread):
         if updates:
             self.socketio.emit('drone_update', updates)
 
+    def run(self):
+        while self.running:
+            try:
+                socks = dict(self.poller.poll(timeout=100))
+                if self.socket in socks:
+                    try:
+                        message = self.socket.recv_string()
+                        if message.startswith("Ping "):
+                            data = json.loads(message[5:])
+                            if data.get('type') == 'drone_ping':
+                                self.process_drone_ping(data)
+                    except Exception as e:
+                        print(f"Error processing message: {e}")
+            except zmq.error.ContextTerminated:
+                print("ZeroMQ context terminated, exiting thread.")
+                break
+            except Exception as e:
+                print(f"Error during polling: {e}")
+                break
+
     def stop(self):
+        print("Closing InterDroneLatencyTracker Thread") 
         self.running = False
+        self.join() # Wait for thread to finish
+        print("Closing ZMQ sockets") 
         self.socket.close()
+        print("Terminating ZeroMQ context") 
         self.context.term()
 
-def ping_one(ip):
-    try:
-        # Get raw ping result
-        raw_latency = ping(ip, timeout=CONFIG['DRONE_TIMEOUT'] / 1000, unit='ms')
-
-        # Convert and validate
-        latency = float(raw_latency) if raw_latency is not None else CONFIG['DRONE_TIMEOUT']
-        status = 'timeout' if latency >= CONFIG['DRONE_TIMEOUT'] else 'ok'
-
-        with gcs_to_drone_lock:
-            gcs_to_drone_latency_result[ip] = {
-                'latency': latency,
-                'status': status,
-                'ip': ip
-            }
-        return True
-    except Exception as e:
-        print(f"❌ Ping error for {ip}: {str(e)}")
-        with gcs_to_drone_lock:
-            gcs_to_drone_latency_result[ip] = {
-                'latency': CONFIG['DRONE_TIMEOUT'],
-                'status': 'error',
-                'ip': ip
-            }
-        return False
+class DroneLatencyTracker(Thread):
+    def __init__(self, socketio_):
+        super().__init__()
+        self.socketio = socketio_
+        self.gcs_to_drone_latency_result = {}
+        self.gcs_to_drone_lock = threading.Lock()
         
-def track_drone_latency():
-    while True:
-        threads = []
-        for index, drone_ip in enumerate(ALL_DRONE_IPS):
-            # if drone_ip != my_ip_addr:
-            t = threading.Thread(target=ping_one, args=(drone_ip,), daemon=True)
-            t.start()
-            threads.append(t)
-                
-        for t in threads:
-            t.join(CONFIG['DRONE_TIMEOUT'] / 1000 + 0.2)
+    def ping_one(self,ip):
+        try:
+            # Get raw ping result
+            raw_latency = ping(ip, timeout=CONFIG['DRONE_TIMEOUT'] / 1000, unit='ms')
 
-        with data_lock:
-            current_time = time.time() - start_time
-            updates = {}
-            for target, result in gcs_to_drone_latency_result.items():
-                new_result = PingResult(
-                    time=current_time,
-                    latency=result['latency'],
-                    status=result['status']
-                )
-                gcs_to_drone_latency_data[target].append(new_result)
-                if len(gcs_to_drone_latency_data[target]) > CONFIG['MAX_HISTORY']:
-                    gcs_to_drone_latency_data[target].pop(0)
-                updates[target] = {
-                    'time': new_result.time,
-                    'latency': new_result.latency,
-                    'status': new_result.status
+            # Convert and validate
+            latency = float(raw_latency) if raw_latency is not None else CONFIG['DRONE_TIMEOUT']
+            status = 'timeout' if latency >= CONFIG['DRONE_TIMEOUT'] else 'ok'
+
+            with self.gcs_to_drone_lock:
+                self.gcs_to_drone_latency_result[ip] = {
+                    'latency': latency,
+                    'status': status,
+                    'ip': ip
                 }
-            socketio.emit('latency_update', updates)
+            return True
+        except Exception as e:
+            print(f"❌ Ping error for {ip}: {str(e)}")
+            with self.gcs_to_drone_lock:
+                self.gcs_to_drone_latency_result[ip] = {
+                    'latency': CONFIG['DRONE_TIMEOUT'],
+                    'status': 'error',
+                    'ip': ip
+                }
+            return False
+            
+    def run(self):
+        while True:
+            threads = []
+            for index, drone_ip in enumerate(ALL_DRONE_IPS):
+                t = threading.Thread(target=self.ping_one, args=(drone_ip,), daemon=True)
+                t.start()
+                threads.append(t)
+                    
+            for t in threads:
+                t.join(CONFIG['DRONE_TIMEOUT'] / 1000 + 0.2)
+
+            with data_lock:
+                current_time = time.time() - start_time
+                updates = {}
+                for target, result in self.gcs_to_drone_latency_result.items():
+                    new_result = PingResult(
+                        time=current_time,
+                        latency=result['latency'],
+                        status=result['status']
+                    )
+                    gcs_to_drone_latency_data[target].append(new_result)
+                    if len(gcs_to_drone_latency_data[target]) > CONFIG['MAX_HISTORY']:
+                        gcs_to_drone_latency_data[target].pop(0)
+                    updates[target] = {
+                        'time': new_result.time,
+                        'latency': new_result.latency,
+                        'status': new_result.status
+                    }
+                self.socketio.emit('latency_update', updates)
+
+    def stop(self):
+        print("Closing DroneLatencyTracker Thread..") 
+        self.running = False
 
 @app.route('/')
 def index():
@@ -172,11 +187,8 @@ def drones():
 
 @socketio.on('connect')
 def handle_connect():
-    if not hasattr(app, 'website_thread'):
-        app.website_thread = threading.Thread(target=track_drone_latency)
-        app.website_thread.daemon = True
-        app.website_thread.start()
 
+    # Emit initial data to the clients    
     with data_lock:
         socketio.emit('initial_data', {
             target: [{
@@ -196,19 +208,24 @@ def handle_connect():
             for target in DRONE_TARGETS
         })
 
-@app.teardown_appcontext   #cause used daemon threads which automatically exits when main exits
-                            # Registers a function to be called when the application context ends
+@app.teardown_appcontext
 def cleanup(exception=None):
-    print("cleanup")
-    if hasattr(app, 'ping_listener'):
-        print("ping listener stop")
-        app.ping_listener.stop()
+    print("Cleanup")
 
 if __name__ == '__main__':
-    ping_listener = PingListener(socketio)
-    ping_listener.daemon = True
-    ping_listener.start()
+    # 3 processes, inter drone latency tracker, drone pinger and flask app
+    inter_drone_listener = InterDroneLatencyTracker(socketio)
+    inter_drone_listener.daemon = True
+    inter_drone_listener.start()
+
+    drone_pinger = DroneLatencyTracker(socketio)
+    drone_pinger.daemon = True
+    drone_pinger.start()
+
     try:
         socketio.run(app, debug=False, host='0.0.0.0')
     finally:
-        ping_listener.stop()
+        print("Stopping InterDroneLatencyTracker")
+        inter_drone_listener.stop()
+        drone_pinger.stop()
+        pass 
