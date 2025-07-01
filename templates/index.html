@@ -242,7 +242,7 @@
         };
 
         // Handler for initial data load
-        socket.on('initial_data', data => {
+        socket.on('latency_data', data => {
             Object.entries(data).forEach(([target, values]) => {
                 const chart = charts[target];
                 // Format data for Chart.js

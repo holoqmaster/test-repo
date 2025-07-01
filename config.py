@@ -5,26 +5,6 @@ ALL_DRONE_IPS = [
     '192.168.65.199', '192.168.65.200', '192.168.65.201', 'google.com'
 ]
 
-# Drone network IP addresses (can be modified at runtime)
-# Nested JSON, should be dynamic later on
-ALL_DRONE_TARGETS = {
-    "drone_1": 
-    {
-        'drone 1 to drone 2': '192.168.65.200',
-        'drone 1 to drone 3 ': '192.168.65.201'
-    },
-    "drone_2": 
-    {
-        'drone 2 to drone 1': '192.168.65.199',
-        'drone 2 to drone 3 ': '192.168.65.201'
-    },
-    "drone_3": 
-    {
-        'drone 3 to drone 1': '192.168.65.201',
-        'drone 3 to drone 2 ': '192.168.65.199'
-    }
-}
-
 # Configuration parameters
 CONFIG = {
     # Website monitoring

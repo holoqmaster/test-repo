@@ -127,7 +127,7 @@
             {% for target, ip in targets.items() %}
             <div class="chart-card" id="{{ target }}-card">
                 <div class="chart-header">
-                    <div class="chart-title">{{ target }} ({{ ip }})</div>
+                    <div class="chart-title">{{ target }} </div>
                     <div class="status-display">
                         <div class="current-latency" id="{{ target }}-latency">-- ms</div>
                         <div class="status-icon" id="{{ target }}-icon">
@@ -159,7 +159,7 @@
         createChartForDrone('{{ target }}', '{{ ip }}');
         {% endfor %}
 
-        function createChartForDrone(target, ip) {
+        function createChartForDrone(target, ip) {            
             const ctx = document.getElementById(`${target}-chart`).getContext('2d');
             charts[target] = new Chart(ctx, {
                 type: 'line',
@@ -229,7 +229,7 @@
         const socket = io();
 
         // Socket.io event handlers
-        socket.on('initial_drone_data', data => {
+        socket.on('inter_drone_latency_data', data => {
             Object.entries(data).forEach(([target, values]) => {
                 const chart = charts[target];
                 const formattedData = values.map(v => ({x: v.time, y: v.latency}));
@@ -251,7 +251,15 @@
         });
 
         socket.on('drone_update', updates => {
+        console.log('Received updates:', updates);
+
             Object.entries(updates).forEach(([target, update]) => {
+
+                if (!charts[target]) {
+                    console.log(`Chart does not exist for target: ${target}`);
+                    return;
+                }
+
                 const chart = charts[target];
                 chart.data.datasets[0].data.push({
                     x: update.time,
