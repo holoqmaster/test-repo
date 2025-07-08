@@ -48,11 +48,20 @@ class InterDroneLatencyTracker(Thread):
         self.socketio = socketio
         self.running = True
         self.context = zmq.Context()
+        self.poller = zmq.Poller()
+
         self.socket = self.context.socket(zmq.SUB)
         self.socket.connect("tcp://localhost:5556")
         self.socket.setsockopt_string(zmq.SUBSCRIBE, "Ping")
-        self.poller = zmq.Poller()
-        self.poller.register(self.socket, zmq.POLLIN)
+
+        self.sockets = []
+        for ip in ALL_DRONE_IPS:
+            socket = self.context.socket(zmq.SUB)
+            socket.connect(f"tcp://{ip}:5556")
+            print(f"Connecting to:tcp://{ip}:5556")
+            socket.setsockopt_string(zmq.SUBSCRIBE, "Ping")
+            self.poller.register(socket, zmq.POLLIN)
+            self.sockets.append(socket)
 
     def process_drone_ping(self, data):
         current_time = time.time() - START_TIME
@@ -100,16 +109,17 @@ class InterDroneLatencyTracker(Thread):
         while self.running:
             try:
                 socks = dict(self.poller.poll(timeout=100))
-                if self.socket in socks:
-                    try:
-                        message = self.socket.recv_string()
-                        if message.startswith("Ping "):
-                            data = json.loads(message[5:])
-                            if data.get('type') == 'drone_ping':
-                                # print("Processing data: {}".format(data))
-                                self.process_drone_ping(data)
-                    except Exception as e:
-                        print(f"Error processing message: {e}")
+                for socket in self.sockets:
+                    if socket in socks:
+                        try:
+                            message = socket.recv_string()
+                            if message.startswith("Ping "):
+                                data = json.loads(message[5:])
+                                if data.get('type') == 'drone_ping':
+                                    # print("Processing data: {}".format(data))
+                                    self.process_drone_ping(data)
+                        except Exception as e:
+                            print(f"Error processing message: {e}")
             except zmq.error.ContextTerminated:
                 print("ZeroMQ context terminated, exiting thread.")
                 break
@@ -195,11 +205,11 @@ class DroneLatencyTracker(Thread):
 
 @APP.route('/')
 def index():
-    return render_template('index.html', targets=ALL_DRONE_IPS, config=CONFIG)
+    return render_template('index.html', data=ALL_DRONE_IPS, config=CONFIG)
 
 @APP.route('/drones')
 def drones():
-    return render_template('drones.html', targets=INTER_NODE_LATENCY_DATA, config=CONFIG)
+    return render_template('drones.html', data=INTER_NODE_LATENCY_DATA, config=CONFIG, nodes_ip=ALL_DRONE_IPS)
 
 @SOCKETIO.on('connect')
 def handle_connect():

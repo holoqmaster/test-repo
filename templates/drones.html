@@ -32,7 +32,7 @@
 
         .dashboard {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Adjusted minmax value for three columns */
             gap: 20px;
             width: 100%;
             max-width: 1800px;
@@ -121,10 +121,20 @@
 <body>
     <div class="container">
         <a href="/" class="back-link"><i class="fas fa-arrow-left"></i> Back to Main Dashboard</a>
-        <h1>Drone Ping Latency Monitoring</h1>
+        <h1>Inter Drones Latency Monitoring</h1>
+        
+        <!-- New section for Agent-to-IP mapping -->
+        <div class="agent-mapping">
+            <h2>Agent-to-IP Mapping</h2>
+            <ul>
+                {% for ip in nodes_ip %}
+                <li><strong>Agent {{ loop.index - 1 }}</strong>: {{ ip }}</li>
+                {% endfor %}
+            </ul>
+        </div>
 
         <div class="dashboard" id="dashboard">
-            {% for target, ip in targets.items() %}
+            {% for target, ip in data.items() %}
             <div class="chart-card" id="{{ target }}-card">
                 <div class="chart-header">
                     <div class="chart-title">{{ target }} </div>
@@ -155,7 +165,7 @@
         const charts = {};
 
         // Initialize charts for each target
-        {% for target, ip in targets.items() %}
+        {% for target, ip in data.items() %}
         createChartForDrone('{{ target }}', '{{ ip }}');
         {% endfor %}
 

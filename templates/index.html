@@ -135,7 +135,7 @@
     <!-- Main dashboard container -->
     <div class="dashboard">
         <!-- Loop through each target from backend -->
-        {% for target in targets %}
+        {% for target in data %}
         <div class="chart-card" id="{{ target|replace('.', '-') }}-card">
             <div class="chart-header">
                 <!-- Target name display -->
@@ -169,7 +169,7 @@
         const charts = {};
 
         // Initialize charts for each target
-        {% for target in targets %}
+        {% for target in data %}
         (() => {
             // Get canvas context and create chart
             const ctx = document.getElementById('{{ target|replace(".", "-") }}-chart').getContext('2d');
